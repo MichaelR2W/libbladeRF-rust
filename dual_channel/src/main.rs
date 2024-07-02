@@ -98,17 +98,18 @@ fn init(dev: *mut bladerf, config: &test_params) -> Result<i32, String> {
 fn main() {
     let channels = vec![BladerfChannel::RX1, BladerfChannel::RX2];
     // Example code params -- Works
-    let rx_config: test_params = test_params {
-        samp_rate: 1e6 as u32,
-        num_samples: 2 * 2048 as i64,
-        gain: 50,
-        frequency: 2400e6 as u64,
-        sync_format: bladerf_format_BLADERF_FORMAT_SC16_Q11_META,
-        channels: channels.clone(),
-        flags: BLADERF_META_FLAG_RX_NOW,
-        num_buffers: 32,
-        buffer_size: 8192,
-    };
+    // let rx_config: test_params = test_params {
+    //     samp_rate: 1e6 as u32,
+    //     num_samples: 2 * 2048 as i64,
+    //     gain: 50,
+    //     frequency: 2400e6 as u64,
+    //     sync_format: bladerf_format_BLADERF_FORMAT_SC16_Q11_META,
+    //     channels: channels.clone(),
+    //     flags: BLADERF_META_FLAG_RX_NOW,
+    //     num_buffers: 32,
+    //     buffer_size: 8192,
+    // };
+
     // Example code params without NOW flag -- Sample discontinuity
     // let rx_config: test_params = test_params {
     //     samp_rate: 1e6 as u32,
@@ -121,18 +122,19 @@ fn main() {
     //     num_buffers: 32,
     //     buffer_size: 8192,
     // };
+
     // Our program code params -- Sample discontinuity
-    // let rx_config: test_params = test_params {
-    //     samp_rate: 30.72e6 as u32,
-    //     num_samples: 6144000 as i64,
-    //     gain: 50,
-    //     frequency: 2400e6 as u64,
-    //     sync_format: bladerf_format_BLADERF_FORMAT_SC16_Q11_META,
-    //     channels: channels.clone(),
-    //     flags: 0,
-    //     num_buffers: 512,
-    //     buffer_size: 32 * 1024_u32,
-    // };
+    let rx_config: test_params = test_params {
+        samp_rate: 30.72e6 as u32,
+        num_samples: 6144000 as i64,
+        gain: 50,
+        frequency: 2400e6 as u64,
+        sync_format: bladerf_format_BLADERF_FORMAT_SC16_Q11_META,
+        channels: channels.clone(),
+        flags: 0, // doesn't work with BLADERF_META_FLAG_RX_NOW Either
+        num_buffers: 512,
+        buffer_size: 32 * 1024_u32,
+    };
 
     let mut dev: *mut bladerf = std::ptr::null_mut();
     let mut dev_info: bladerf_devinfo = bladerf_devinfo {
