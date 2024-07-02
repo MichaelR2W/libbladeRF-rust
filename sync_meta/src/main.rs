@@ -24,8 +24,10 @@
 #![allow(non_snake_case)]
 
 use libbladeRF::*;
+use core::time;
 use std::ffi::CStr;
 use std::ptr::*;
+use std::thread::sleep;
 
 struct test_params {
     num_samples: i64,
@@ -123,7 +125,7 @@ fn stream_tx(dev: *mut bladerf, config: &test_params) -> Result<i32, String> {
     }
 
     unsafe {
-        for i in 0..config.num_iterations {
+        for i in 0..10 {
             match bladerf_sync_tx(
                 dev,
                 samples.as_mut_ptr() as *mut _,
@@ -191,7 +193,7 @@ fn stream_rx(dev: *mut bladerf, config: &test_params) -> Result<i32, String> {
         let mut next_sync_timestamp = metadata.timestamp;
         let delay = u64::from(config.samp_rate) * 300 / 1000;
 
-        loop {
+        for i in 0..10 {
             if next_sync_timestamp - metadata.timestamp <= delay + u64::from(config.samp_rate) {
                 metadata.timestamp = next_sync_timestamp;
             } else {
@@ -294,34 +296,141 @@ fn main() {
             0 => println!("Device opened"),
             _ => println!("Failed to open device"),
         }
-        for i in 0..2 {
-            match init(dev, &tx_config) {
-                Ok(_) => println!("Device initialized"),
-                Err(e) => println!("Error: {}", e),
-            }
+        
+        match init(dev, &tx_config) {
+            Ok(_) => println!("Device initialized"),
+            Err(e) => println!("Error: {}", e),
+        }
+        match init(dev, &rx_config) {
+            Ok(_) => println!("Device initialized"),
+            Err(e) => println!("Error: {}", e),
+        }
+
+        let mut tx_samples: Vec<i16> = vec![0; 2 * tx_config.num_samples as usize];
+
+        // Transmit CW at Fc - Fs/4
+        let i_mask: Vec<i16> = [0, 1, 0, -1].to_vec();
+        let q_mask: Vec<i16> = [1, 0, -1, 0].to_vec();
     
-            match stream_tx(dev, &tx_config) {
-                Ok(_) => println!("Streamed {}M samples", tx_config.num_samples * tx_config.num_iterations as i64 / 1e6 as i64),
-                Err(e) => println!("Error: {}", e),
-            }
+        for i in 0..tx_config.num_samples {
+            tx_samples[2 * i as usize] = 2047 * i_mask[(i % 4) as usize];
+            tx_samples[2 * i as usize + 1] = 2047 * q_mask[(i % 4) as usize];
+        }
     
-            match bladerf_enable_module(dev, tx_config.ch, false) {
-                0 => println!("TX module disabled"),
-                _ => println!("Failed to disable module"),
+        let mut metadata: bladerf_metadata = bladerf_metadata {
+            timestamp: 0,
+            status: 0,
+            flags: BLADERF_META_FLAG_TX_BURST_START
+                | BLADERF_META_FLAG_TX_BURST_END,
+            actual_count: 0,
+            reserved: [0; 32],
+        };
+        let mut rx_samples: Vec<i16> = vec![0; 2 * rx_config.num_samples as usize];
+
+
+        unsafe {
+            match bladerf_get_timestamp(dev, bladerf_direction_BLADERF_TX, &mut metadata.timestamp)
+            {
+                0 => println!("Timestamp from get: {}", metadata.timestamp),
+                _ => println!("Failed to get timestamp"),
+            }
+            let delay = u64::from(rx_config.samp_rate) * 250 / 1000;
+            metadata.timestamp += delay;
+            for i in 0..20 {
+                if i % 4 == 0 {
+                    match bladerf_sync_tx(
+                        dev,
+                        tx_samples.as_mut_ptr() as *mut _,
+                        tx_config.num_samples as u32,
+                        &mut metadata,
+                        1000,
+                    ) {
+                        0 => {println!("Timestamp tx: {}", metadata.timestamp)}
+                        _ => println!("Failed to sync tx"),
+                    }
+                    // match bladerf_get_timestamp(dev, bladerf_direction_BLADERF_TX, &mut metadata.timestamp)
+                    // {
+                    //     0 => println!("Timestamp from get tx: {}", metadata.timestamp),
+                    //     _ => println!("Failed to get timestamp"),
+                    // }
+                } else {
+                    match bladerf_sync_rx(
+                        dev,
+                        rx_samples.as_mut_ptr() as *mut _,
+                        rx_config.num_samples as u32,
+                        &mut metadata,
+                        10000) // Timeout in milliseconds
+                {
+                        0 => {
+                            if metadata.status & BLADERF_META_STATUS_OVERRUN != 0 {
+                                println!("Overrun detected. {} valid samples were read.", metadata.actual_count);
+                            } else {
+                            println!("RX'd {} samples at t={}",
+                                    metadata.actual_count, metadata.timestamp);
+                            }
+                        }
+                        _ => {
+                        eprintln!("RX \"now\" failed");
+                    }
+                    
+                    }
+
+                }
+                metadata.timestamp += delay;
+
             }
         }
 
-        // match init(dev, &rx_config) {
-        //     Ok(_) => println!("Device initialized"),
-        //     Err(e) => println!("Error: {}", e),
-        // }
 
-        // match stream_rx(dev, &rx_config) {
-        //     Ok(_) => println!(
-        //         "Streamed {}M samples",
-        //         tx_config.num_samples * tx_config.num_iterations as i64 / 1e6 as i64
-        //     ),
-        //     Err(e) => println!("Error: {}", e),
+
+        // let mut metadata: bladerf_metadata = bladerf_metadata {
+        //     timestamp: 0,
+        //     status: 0,
+        //     flags: 0,
+        //     actual_count: 0,
+        //     reserved: [0; 32],
+        // };
+    
+        // unsafe {
+        //     let mut t = 0;
+        //     match bladerf_get_timestamp(dev, bladerf_direction_BLADERF_TX, &mut metadata.timestamp)
+        //     {
+        //         0 => println!("Timestamp from get: {}", metadata.timestamp),
+        //         _ => println!("Failed to get timestamp"),
+        //     }
+        //     match bladerf_get_timestamp(dev, bladerf_direction_BLADERF_RX, &mut metadata.timestamp) {
+        //         0 => {
+        //             println!("Timestamp from get_timestamp: {:?}", metadata.timestamp);
+        //         }
+        //         _ => println!("Failed to get timestamp"),
+        //     };
+        //     println!("metadata.timestamp = {}", metadata.timestamp);
+
+
+        //     unsafe {
+        //         match bladerf_get_timestamp(dev, bladerf_direction_BLADERF_TX, &mut metadata.timestamp)
+        //         {
+        //             0 => println!("Timestamp from get: {}", metadata.timestamp),
+        //             _ => println!("Failed to get timestamp"),
+        //         }
+        //         for i in 0..10 {
+        //             match bladerf_sync_tx(
+        //                 dev,
+        //                 tx_samples.as_mut_ptr() as *mut _,
+        //                 tx_config.num_samples as u32,
+        //                 &mut metadata,
+        //                 1000,
+        //             ) {
+        //                 0 => {println!("Timestamp: {}", metadata.timestamp)}
+        //                 _ => println!("Failed to sync tx"),
+        //             }
+        //             metadata.timestamp += tx_config.samp_rate as u64;
+        
+        
+        //         }  
+        //     }
+    
+
         // }
 
         // match bladerf_enable_module(dev, rx_config.ch, false) {
